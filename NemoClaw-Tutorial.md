@@ -267,10 +267,115 @@ nemoclaw my-assistant destroy
 | 問題 | 解法 |
 |------|------|
 | `docker: command not found` | 安裝 Docker Engine 或 Docker Desktop，並確認 user 在 `docker` group |
+| `docker group not active in shell` | 跑 `newgrp docker` 或登出再登入，讓 group 生效 |
 | sandbox OOM / 卡死 | 機器 RAM < 8GB 時加上 8GB swap，或升級記憶體 |
 | Dashboard 連不上 | 檢查 port 18789 是否被佔用：`lsof -i :18789` |
 | Inference provider 連線失敗 | `nemoclaw my-assistant inference test` 看詳細錯誤；通常是 API key 沒設好 |
 | 在 Ubuntu 上 Ollama 解壓失敗 | 安裝 `zstd`：`sudo apt install zstd` |
+| `npm error code ECONNRESET` 安裝時斷線 | 見 9.1 — 調 npm timeout / 換 mirror |
+| `unresolvable CDI devices nvidia.com/gpu=all` | 見 9.2 — 安裝 NVIDIA Container Toolkit |
+
+### 9.1 npm `ECONNRESET` — 安裝 NemoClaw dependencies 時連線中斷
+
+症狀（安裝 log 出現）：
+
+```
+✗  Installing NemoClaw dependencies
+npm error code ECONNRESET
+npm error network aborted
+```
+
+通常是出去到 `registry.npmjs.org` 不穩（NCHC / 台灣 VM 常見）。修法：
+
+```bash
+# 1. 拉長 timeout、加 retry
+npm config set fetch-retries 5
+npm config set fetch-retry-mintimeout 20000
+npm config set fetch-retry-maxtimeout 120000
+npm config set fetch-timeout 600000
+
+# 2. 清 cache（避免半下載的 tarball 干擾）
+npm cache clean --force
+
+# 3. 換 Asia mirror（亞洲速度比官方快很多）
+npm config set registry https://registry.npmmirror.com/
+
+# 4. 重跑安裝
+curl -fsSL https://www.nvidia.com/nemoclaw.sh | bash
+```
+
+`npmmirror.com` 不通的話，備用 mirror：
+
+```bash
+npm config set registry https://registry.yarnpkg.com/
+```
+
+裝完想切回官方：
+
+```bash
+npm config set registry https://registry.npmjs.org/
+```
+
+**診斷網路**（判斷是 registry 還是 VM 出去整體有問題）：
+
+```bash
+curl -v https://registry.npmjs.org/npm 2>&1 | tail -20            # 小檔
+curl -v -o /dev/null https://registry.npmjs.org/npm/-/npm-10.9.8.tgz 2>&1 | tail -10  # 大檔
+```
+
+### 9.2 `unresolvable CDI devices nvidia.com/gpu=all` — Docker 沒裝 NVIDIA Container Toolkit
+
+症狀（preflight 紅字）：
+
+```
+Docker is configured for CDI device injection (CDISpecDirs is set), but no
+nvidia.com/gpu CDI spec was found on the host. OpenShell's gateway start will
+fail with `unresolvable CDI devices nvidia.com/gpu=all`.
+```
+
+原因：Docker daemon 開了 CDI device injection，但缺 `nvidia-container-toolkit`（提供 `nvidia-ctk`）。
+
+#### 方案 A — 跳過 GPU（最快，適合 remote inference demo）
+
+```bash
+nemoclaw onboard --no-gpu
+```
+
+Wizard 內 provider 選 NVIDIA Endpoints / OpenAI / Anthropic（**不要選 Local Ollama**）。
+
+#### 方案 B — 安裝 NVIDIA Container Toolkit（需要 local GPU inference）
+
+先確認真有 GPU：
+
+```bash
+nvidia-smi    # 應該看到 GPU 型號與 driver version
+```
+
+接著安裝 + 產 CDI spec：
+
+```bash
+# 1. 加 repo
+curl -fsSL https://nvidia.github.io/libnvidia-container/gpgkey \
+  | sudo gpg --dearmor -o /usr/share/keyrings/nvidia-container-toolkit-keyring.gpg
+
+curl -s -L https://nvidia.github.io/libnvidia-container/stable/deb/nvidia-container-toolkit.list \
+  | sed 's#deb https://#deb [signed-by=/usr/share/keyrings/nvidia-container-toolkit-keyring.gpg] https://#' \
+  | sudo tee /etc/apt/sources.list.d/nvidia-container-toolkit.list
+
+# 2. 安裝
+sudo apt-get update
+sudo apt-get install -y nvidia-container-toolkit
+
+# 3. 產 CDI spec
+sudo mkdir -p /etc/cdi
+sudo nvidia-ctk cdi generate --output=/etc/cdi/nvidia.yaml
+
+# 4. 驗證：應看到 nvidia.com/gpu=0 和 nvidia.com/gpu=all
+nvidia-ctk cdi list
+
+# 5. 重跑 onboarding
+nemoclaw onboard
+```
 
 ---
 
