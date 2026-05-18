@@ -246,20 +246,9 @@ nemoclaw my-assistant destroy
 
 ---
 
-## 7. 推薦的「30 分鐘 demo 流程」
-
-如果要快速向同事 / 客戶展示 NemoClaw，照這個順序跑：
-
-1. **安裝**（5 min）— 跑 `curl ... | bash`
-2. **Onboarding**（5 min）— 選 NVIDIA Endpoints + 取一個 sandbox 名字
-3. **Dashboard 對話**（5 min）— 開瀏覽器，問 agent 兩三個問題
-4. **加一個 skill**（10 min）— 用 Demo 5 的 NASA APOD
-5. **換 provider / 重啟**（3 min）— 展示 Demo 3 + Demo 4
-6. **Backup**（2 min）— Demo 8，強調 reproducibility
-
 ---
 
-## 8. 進階學習資源
+## 7. 進階學習資源
 
 | 主題 | 路徑 / 連結 |
 |------|-------------|
@@ -273,7 +262,7 @@ nemoclaw my-assistant destroy
 
 ---
 
-## 9. 常見問題 (Troubleshooting)
+## 8. 常見問題 (Troubleshooting)
 
 | 問題 | 解法 |
 |------|------|
