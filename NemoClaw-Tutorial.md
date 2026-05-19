@@ -246,8 +246,6 @@ nemoclaw my-assistant destroy
 
 ---
 
----
-
 ## 7. 進階學習資源
 
 | 主題 | 路徑 / 連結 |
@@ -262,7 +260,73 @@ nemoclaw my-assistant destroy
 
 ---
 
-## 8. 常見問題 (Troubleshooting)
+## 8. 完整安裝順序（NCHC Ubuntu VM 實戰紀錄）
+
+這是在 NCHC GPU VM（Ubuntu + NVIDIA H200）上實際走過一次的順序，把碰到的錯誤跟需要安裝的東西整理在一起。其他 Ubuntu 環境流程大同小異。
+
+### 8.1 安裝項目（依順序）
+
+| # | 項目 | 用途 | 指令 |
+|---|------|------|------|
+| 1 | Docker Engine | OpenShell sandbox 的 runtime | NemoClaw installer 會自動裝 |
+| 2 | 把使用者加進 `docker` group | 讓 docker 不用 sudo | installer 會做，但要 `newgrp docker` 才生效 |
+| 3 | Node.js 22.x + npm 10+ | NemoClaw CLI runtime | installer 透過 `nvm` 自動裝 |
+| 4 | NemoClaw CLI 本體 | 主程式 | `curl -fsSL https://www.nvidia.com/nemoclaw.sh \| bash` |
+| 5 | NVIDIA Container Toolkit | 提供 `nvidia-ctk`、產 CDI spec、讓 sandbox 看到 GPU | 見 9.2（GPU 機才需要） |
+| 6 | CDI device spec (`/etc/cdi/nvidia.yaml`) | 讓 Docker 把 `nvidia.com/gpu` 解析成實體裝置 | `sudo nvidia-ctk cdi generate --output=/etc/cdi/nvidia.yaml` |
+
+> Driver / CUDA 不在 NemoClaw 的安裝範圍內 — NCHC VM 預設已經有 driver 580.142 / CUDA 13.0，`nvidia-smi` 能跑就算 OK。
+
+### 8.2 錯誤總表（依出現順序）
+
+| 階段 | 錯誤訊息 | 原因 | 修法 | 詳見 |
+|------|----------|------|------|------|
+| Docker 安裝後 | `Your user 'ubuntu' is not in the docker group` | group membership 還沒在當前 shell 生效 | `newgrp docker`，然後重跑 installer | — |
+| `[2/3] NemoClaw CLI` | `npm error code ECONNRESET` / `npm error network aborted` | npm 出去到 `registry.npmjs.org` 中斷（亞洲常見） | 拉高 timeout + 換 mirror | 9.1 |
+| `[1/8] Preflight checks` | `unresolvable CDI devices nvidia.com/gpu=all` | Docker 開了 CDI 但缺 `nvidia-container-toolkit` | 裝 toolkit + 產 CDI spec，或 `nemoclaw onboard --no-gpu` | 9.2 |
+
+### 8.3 一鍵 setup 腳本（給之後重做的人）
+
+```bash
+#!/usr/bin/env bash
+set -euo pipefail
+
+# 0. 先設好 npm 環境變數，避免 NemoClaw installer 中途死在 ECONNRESET
+mkdir -p ~/.npm
+cat > ~/.npmrc <<EOF
+fetch-retries=5
+fetch-retry-mintimeout=20000
+fetch-retry-maxtimeout=120000
+fetch-timeout=600000
+registry=https://registry.npmmirror.com/
+EOF
+
+# 1. 跑 NemoClaw installer
+curl -fsSL https://www.nvidia.com/nemoclaw.sh | bash
+
+# 2. 若 docker group 還沒生效，新開 shell 或 newgrp
+#    newgrp docker
+
+# 3. GPU 機器才需要：裝 NVIDIA Container Toolkit + CDI spec
+if command -v nvidia-smi >/dev/null && ! command -v nvidia-ctk >/dev/null; then
+  curl -fsSL https://nvidia.github.io/libnvidia-container/gpgkey \
+    | sudo gpg --dearmor -o /usr/share/keyrings/nvidia-container-toolkit-keyring.gpg
+  curl -s -L https://nvidia.github.io/libnvidia-container/stable/deb/nvidia-container-toolkit.list \
+    | sed 's#deb https://#deb [signed-by=/usr/share/keyrings/nvidia-container-toolkit-keyring.gpg] https://#' \
+    | sudo tee /etc/apt/sources.list.d/nvidia-container-toolkit.list
+  sudo apt-get update
+  sudo apt-get install -y nvidia-container-toolkit
+  sudo mkdir -p /etc/cdi
+  sudo nvidia-ctk cdi generate --output=/etc/cdi/nvidia.yaml
+fi
+
+# 4. Onboarding
+nemoclaw onboard
+```
+
+---
+
+## 9. 常見問題 (Troubleshooting)
 
 | 問題 | 解法 |
 |------|------|
