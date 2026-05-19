@@ -66,18 +66,28 @@ openshell --help
 
 ## 3. 動手做：記帳助理 Agent
 
-下面是完整流程。預設 inference provider 是 Claude（需要 `ANTHROPIC_API_KEY`，或換成 NVIDIA Endpoints / OpenAI / Ollama 都行）。
+下面是完整流程。**預設用 OpenClaw 當 agent + NVIDIA Endpoints 當 inference provider** — 這是最沒門檻的組合，去 <https://build.nvidia.com> 註冊就有免費 API key，不需要 Anthropic / OpenAI 帳號。如果你想用其他組合（Ollama / Claude），看 §5 變化版。
 
-### Step 1 — 建一個 sandbox，把 Claude Code 裝進去
+### Step 1 — 建一個 sandbox，把 OpenClaw agent 裝進去
+
+先在 host 上設好 NVIDIA API key（從 <https://build.nvidia.com> 取得）：
 
 ```bash
-export ANTHROPIC_API_KEY=sk-ant-...     # 或設定別的 provider
-openshell sandbox create budget-agent -- claude
+export NVIDIA_API_KEY=nvapi-...
 ```
 
-`-- claude` 表示這個 sandbox 預載 [Claude Code](https://docs.anthropic.com/en/docs/claude-code) 當 agent 本體。建好之後 OpenShell 會直接把你連進 sandbox shell（看到 prompt 變 `sandbox$`）。
+建立 sandbox：
 
-> 想換 agent：`--from openclaw -- openclaw`、`--from ollama -- ollama run llama3` 都行。Tutorial 後面用 `claude`。
+```bash
+openshell sandbox create budget-agent --from openclaw -- openclaw
+```
+
+- `--from openclaw`：用預載 OpenClaw 的 base image
+- `-- openclaw`：sandbox 啟動時直接跑 `openclaw` CLI（agent 本體）
+
+建好之後 OpenShell 會把你連進 sandbox shell（prompt 變 `sandbox$`）。OpenClaw 第一次啟動會問你 inference provider — 選 **NVIDIA Endpoints** 並貼上 API key 即可。
+
+> NemoClaw 就是 OpenClaw + OpenShell 的整合包。這份 tutorial 直接用底層的 OpenClaw + OpenShell，會更清楚兩層在做什麼。
 
 ### Step 2 — 在 sandbox 內準備測試資料
 
@@ -112,14 +122,16 @@ EOF
 
 ### Step 3 — 讓 agent 做第一份報表
 
-最簡單的玩法：直接跟 `claude` 對話。
+兩種跟 OpenClaw 對話的方式，挑一個用：
+
+**(a) 互動模式**（推薦新手）：
 
 ```bash
 # sandbox$
-claude
+openclaw
 ```
 
-進到 Claude Code 互動介面後輸入：
+進到 REPL 後輸入 prompt：
 
 ```
 請分析 ~/finance/transactions.csv：
@@ -128,7 +140,13 @@ claude
 3. 把結果寫成 ~/finance/reports/2026-04.md
 ```
 
-Claude Code 會自己用 Python（sandbox 內建 Python 3.14）讀 CSV、跑 pandas / 純 stdlib 算數、然後 `write` 出報表檔。完成後可以開來看：
+**(b) One-shot 模式**（適合腳本化）：
+
+```bash
+openclaw agent --agent main -m "請分析 ~/finance/transactions.csv：分類花費、算佔比、寫到 ~/finance/reports/2026-04.md" --session-id apr-report
+```
+
+OpenClaw 會自己用 Python（sandbox 內建 Python 3.14）讀 CSV、跑 pandas / 純 stdlib 算數、然後 `write` 出報表檔。完成後可以開來看：
 
 ```bash
 cat ~/finance/reports/2026-04.md
@@ -138,7 +156,7 @@ cat ~/finance/reports/2026-04.md
 
 ### Step 4 — 進階對話：要省錢建議
 
-繼續在 Claude Code 裡問：
+繼續在 OpenClaw REPL 裡問（或用 `openclaw agent ... -m "..."` 接一條 prompt）：
 
 ```
 看一下上面的報表，幫我找出 3 個可以省錢的點，並算如果照建議做，
@@ -151,6 +169,8 @@ cat ~/finance/reports/2026-04.md
 請讀 ~/finance/transactions.csv 還有任何 transactions-*.csv 檔案，
 畫出近三個月消費趨勢的 ASCII bar chart，存到 reports/trend.md
 ```
+
+> 💡 OpenClaw 的「persona」可以在 `~/.openclaw/SOUL.md` 改 — 例如要它「講話像精算師」或「給建議要直接不要委婉」，下次對話就會帶這個風格。
 
 ✅ **第二個 milestone**：agent 從「會算」升級到「會建議」。
 
@@ -166,20 +186,22 @@ cat > ~/budget-policy.yaml <<'EOF'
 filesystem:
   read:
     - ~/finance/**
+    - ~/.openclaw/**  # agent 自己的 memory / skills
     - /usr/**         # 系統 binary 必要
   write:
     - ~/finance/reports/**
+    - ~/.openclaw/memory/**
 
 network:
   egress:
-    # 只允許 Anthropic API（給 Claude 推理用）
-    - host: api.anthropic.com
+    # 只允許 NVIDIA Endpoints（給 OpenClaw 推理用）
+    - host: integrate.api.nvidia.com
       method: ["POST"]
     # 其他全部 deny
 
 inference:
-  provider: anthropic
-  model: claude-haiku-4-5
+  provider: nvidia
+  model: meta/llama-3.1-70b-instruct
 EOF
 
 openshell policy set budget-agent --policy ~/budget-policy.yaml --wait
@@ -209,8 +231,8 @@ echo hi > /tmp/test
 curl -sS https://example.com
 #  → 403 from proxy (policy_denied)
 
-# (5) 連 Anthropic API → 允許（透過 claude 工具）
-claude -p "say hi in 5 words"
+# (5) 連 NVIDIA Endpoints → 允許（透過 openclaw）
+openclaw agent --agent main -m "say hi in 5 words" --session-id policy-test
 ```
 
 ✅ **第三個 milestone**：你的記帳助理只能做它該做的事，其他全部 deny。
@@ -246,15 +268,20 @@ openshell sandbox create local-llm --from ollama -- ollama run llama3
 
 ---
 
-## 5. Tutorial 變化版（不想用 Claude？）
+## 5. Tutorial 變化版（換 agent / 換 inference provider）
 
-| 想用… | 怎麼改 Step 1 |
-|------|---------------|
-| **OpenClaw** | `openshell sandbox create budget-agent --from openclaw -- openclaw agent --agent main` |
-| **本地 Ollama** | `openshell sandbox create budget-agent --from ollama -- ollama run llama3.1` |
-| **NVIDIA Endpoints** | 先 `openshell inference set --provider nvidia --model meta/llama-3.1-70b-instruct`，再用 `claude` 或 `openclaw` 都會走 NVIDIA |
+預設組合是 **OpenClaw + NVIDIA Endpoints**。其他幾種對應到 Step 1：
 
-Step 2-4 完全相同，只是「在 sandbox 內怎麼跟 agent 對話」會稍微不一樣（OpenClaw 用 `openclaw -m "..."`，Ollama 直接 prompt）。
+| 想用… | API key 來源 | 怎麼改 Step 1 |
+|------|--------------|---------------|
+| **OpenClaw + NVIDIA Endpoints**（預設） | <https://build.nvidia.com>（免費） | `openshell sandbox create budget-agent --from openclaw -- openclaw` |
+| **OpenClaw + 本地 Ollama** | 不需 API key（要有 GPU 或夠快的 CPU） | 先 `ollama pull llama3.1` 然後 `openshell sandbox create budget-agent --from ollama -- openclaw` |
+| **OpenClaw + OpenAI** | OpenAI 帳號 | `export OPENAI_API_KEY=...` 再建 sandbox，OpenClaw onboarding 選 OpenAI |
+| **Claude Code（付費版）** | Anthropic 帳號 | `export ANTHROPIC_API_KEY=sk-ant-...` 然後 `openshell sandbox create budget-agent -- claude` — 互動方式改用 `claude` 而不是 `openclaw` |
+
+Step 2-4 流程一樣，只是「在 sandbox 內怎麼跟 agent 對話」的指令名字會變（OpenClaw → `openclaw`，Claude Code → `claude`）。
+
+> **NCHC bootcamp 推薦**：用預設組合（NVIDIA Endpoints）。如果你的 VM 有 GPU 想完全離線，第二個（Ollama）也很適合。
 
 ---
 
@@ -264,7 +291,8 @@ Step 2-4 完全相同，只是「在 sandbox 內怎麼跟 agent 對話」會稍�
 |------|------|
 | `openshell: command not found` | 重開 shell 或 `source ~/.bashrc`；確認 `~/.local/bin` 在 `PATH` |
 | `unresolvable CDI devices nvidia.com/gpu=all` | 不需要 GPU 就加 `--no-gpu`；需要的話照 NemoClaw tutorial §9.2 裝 nvidia-container-toolkit |
-| Claude 在 sandbox 內說「`ANTHROPIC_API_KEY` not set」 | 在 host 先 export，OpenShell provider 會自動帶進 sandbox；或用 `openshell provider create --type anthropic --from-existing` |
+| OpenClaw 在 sandbox 內說「no inference provider」 | 在 host 先 `export NVIDIA_API_KEY=nvapi-...` 再建 sandbox；或在 sandbox 內跑 `openclaw config inference` 重設 |
+| 改用 Claude Code 時 `ANTHROPIC_API_KEY not set` | host 先 `export ANTHROPIC_API_KEY=sk-ant-...`；或用 `openshell provider create --type anthropic --from-existing` |
 | 進 sandbox 後執行 curl 卡住 | 預設 network default-deny，要 `openshell policy set` 加 host 白名單 |
 | 寫檔失敗 `Permission denied` | 檢查 policy 的 `filesystem.write` 有沒有列到目標路徑 |
 
