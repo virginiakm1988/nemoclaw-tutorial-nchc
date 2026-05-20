@@ -308,35 +308,52 @@ ls /home/ubuntu/budget-demo 2>&1   #  → No such file or directory
 
 ### Step 3 — 把 public CSV 帶進 sandbox（但不帶 private）
 
-NemoClaw 提供 `share mount` 子命令，用 SSHFS 把 sandbox 的 `/sandbox` 雙向掛到 host：
+最穩的做法：直接在 sandbox 內用 heredoc 重建 public CSV。不需要 mount、不會踩到路徑 probe 的雷。
+
+```bash
+# 還在 sandbox 內
+mkdir -p ~/budget && cd ~/budget
+
+cat > transactions.csv <<'EOF'
+date,amount,merchant,category
+2026-05-02,-3200,房東,居住
+2026-05-03,-185,全聯,生活
+2026-05-05,-95,星巴克,餐飲
+2026-05-07,-1250,台電,居住
+2026-05-09,-420,Uber Eats,餐飲
+2026-05-11,-680,家樂福,生活
+2026-05-13,-95,星巴克,餐飲
+2026-05-15,-260,Spotify,訂閱
+2026-05-18,-1480,誠品,購物
+2026-05-21,-560,7-11,生活
+2026-05-25,-95,星巴克,餐飲
+2026-05-28,-340,計程車,通勤
+EOF
+```
+
+驗證：
+
+```bash
+ls ~/budget/                              # → transactions.csv
+ls ~/budget-demo/private 2>&1             # → No such file or directory
+```
+
+`private` 那份依然只在 host，sandbox 物理上接觸不到。
+
+#### Optional：用 `share mount` 雙向同步（進階）
+
+如果你想要 sandbox 跟 host 雙向同步檔案（例如要把 agent 跑出的報表直接寫回 host 目錄），可以用 SSHFS 掛載：
 
 ```bash
 # 開新的 host terminal（保留 sandbox shell 不要關）
-nemoclaw my-assistant share mount
-# 預設掛到 ~/.nemoclaw/mounts/my-assistant
-```
+# 先在 sandbox 內確認 home 路徑：echo $HOME
+nemoclaw my-assistant share mount $HOME_FROM_SANDBOX
 
-掛好後，host 端寫到 mount point 的檔案會直接出現在 sandbox 內：
-
-```bash
-# 還在 host
-mkdir -p ~/.nemoclaw/mounts/my-assistant/budget
+# 然後從 host cp 檔案進去
 cp ~/budget-demo/public/transactions.csv ~/.nemoclaw/mounts/my-assistant/budget/
-# 注意：~/budget-demo/private/ 完全沒碰，private CSV 不會進 sandbox
 ```
 
-回到 sandbox shell 確認 public 已經進去、private 仍然看不到：
-
-```bash
-# sandbox 內
-ls /sandbox/budget/
-#  → transactions.csv
-
-# private 路徑依舊不存在
-ls /sandbox/private 2>&1     #  → No such file or directory
-```
-
-> 不想用 `share mount` 的話，最簡單的替代方案是直接在 sandbox 內用 `cat > transactions.csv <<EOF ... EOF` heredoc 重建檔案 — 同樣達到「只有 public 進 sandbox」的效果。
+> ⚠️ `share mount` 預設 sandbox 路徑是 `/sandbox`。如果你的 sandbox image 把工作目錄放在 `/home/sandbox` 或別處，`/sandbox` 會 probe 失敗，要顯式指定路徑。先 `nemoclaw <name> connect` → `pwd` 確認再 mount。
 
 ### Step 4 — 用 OpenClaw TUI 請 agent 做分析
 
@@ -348,10 +365,10 @@ openclaw tui
 在 TUI 內輸入：
 
 ```
-請讀 /sandbox/budget/transactions.csv：
+請讀 ~/budget/transactions.csv：
 1. 把 category 分組，算出 5 月每組的總金額
 2. 算每組佔總支出的百分比
-3. 把報表寫到 /sandbox/budget/reports/2026-05.md
+3. 把報表寫到 ~/budget/reports/2026-05.md
 ```
 
 OpenClaw 會用 sandbox 內建的 Python 跑分析、寫出 markdown 報表。
@@ -366,21 +383,26 @@ OpenClaw 會用 sandbox 內建的 Python 跑分析、寫出 markdown 報表。
 
 離開 TUI：`/exit`。
 
-### Step 5 — 把報表抓回 host 看
+### Step 5 — 看 agent 跑出的報表
 
-因為 Step 3 已經 `share mount` 過了，sandbox 內寫到 `/sandbox/budget/reports/` 的報表會自動出現在 host：
+在 sandbox 內直接 `cat` 看：
 
 ```bash
-# host 端
-cat ~/.nemoclaw/mounts/my-assistant/budget/reports/2026-05.md
+# 還在 sandbox 內（先 /exit 離開 TUI）
+cat ~/budget/reports/2026-05.md
 ```
 
-完成後可以 unmount 跟 exit：
+如果你 Step 3 走的是 optional 的 `share mount`，那 host 端會同步看到報表：
 
 ```bash
 # host
-nemoclaw my-assistant share unmount
+cat ~/.nemoclaw/mounts/my-assistant/budget/reports/2026-05.md
+nemoclaw my-assistant share unmount        # 完成後 unmount
+```
 
+退出 sandbox：
+
+```bash
 # sandbox shell
 exit
 ```
@@ -502,6 +524,7 @@ nemoclaw onboard
 | `unresolvable CDI devices nvidia.com/gpu=all` | 見 9.2 — 安裝 NVIDIA Container Toolkit |
 | `Docker GPU patch failed: AMD CDI spec not found` | NemoClaw GPU patch 會找 AMD CDI，沒有就失敗。先 `openshell sandbox delete <name>`，再 `export NEMOCLAW_DOCKER_GPU_PATCH=0` 跳過 patch，重跑 `nemoclaw onboard`。NVIDIA GPU 還是會透過 CDI 正常 passthrough |
 | `'openclaw agent --local' is not supported inside NemoClaw sandboxes` | `--local` 會繞過 gateway 安全機制，預期會被擋。在 sandbox 內改用 `openclaw tui`（互動）或從 host 端用 dashboard / `nemoclaw <name> connect` |
+| `share mount`：`Could not verify sandbox path '/sandbox' (missing path or probe failure)` | 預設路徑 `/sandbox` 在某些 image 不存在。先 `nemoclaw <name> connect` → `pwd` 確認真實 home 路徑，再 `nemoclaw <name> share mount <該路徑>` 顯式指定 |
 
 ### 9.1 npm `ECONNRESET` — 安裝 NemoClaw dependencies 時連線中斷
 
