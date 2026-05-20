@@ -252,7 +252,7 @@ nemoclaw my-assistant destroy
 
 ## 6.5 Mini-demo：用 NemoClaw 做「只能看 public 帳本」的記帳助手
 
-這個 demo 把前面學到的東西串起來：建立**兩份**假帳本（一份 public、一份 private），透過 OpenShell policy 讓 agent **只能讀 public 的那份**，然後請 agent 做簡單分析。重點是體驗 NemoClaw 的 filesystem 隔離。
+這個 demo 展示 NemoClaw / OpenShell 最重要的安全特性：**sandbox 預設與 host 完全隔離**。我們在 host 上建兩份 CSV（public + private），只把 public 帶進 sandbox，然後從 sandbox 內驗證 private 那份**根本看不到**，最後請 agent 對 public 做分析。
 
 ### Step 1 — 在 host 上建兩份假 CSV
 
@@ -287,95 +287,124 @@ date,amount,source,note
 EOF
 ```
 
-### Step 2 — 把 public 目錄掛進 sandbox，private 不掛
+### Step 2 — 進 sandbox，先確認 host isolation 有生效
 
-NemoClaw / OpenShell 的 sandbox 預設是隔離的 — host 的檔案 **不會** 自動出現在 sandbox 內。我們只把 public 那份 mount 進去：
-
-```bash
-# 停掉並重新 attach 一個只含 public 目錄的 workspace
-nemoclaw my-assistant workspace add ~/budget-demo/public --as /workspace/budget --readonly
-nemoclaw my-assistant restart
-```
-
-關鍵點：
-- `--readonly`：agent 不能改你的原始檔（多一層保險）
-- `private/` 完全沒掛進去，sandbox 內沒有任何路徑能看到它
-
-### Step 3 — 用 policy 把 agent 鎖在 `/workspace/budget`
-
-```bash
-cat > ~/budget-policy.yaml <<'EOF'
-filesystem:
-  read:
-    - /workspace/budget/**     # 只能讀 public CSV
-    - /sandbox/.openclaw/**    # agent 自己的 memory / skills
-    - /usr/**                  # 系統 binary
-  write:
-    - /workspace/budget/reports/**
-    - /sandbox/.openclaw/memory/**
-
-network:
-  egress:
-    - host: integrate.api.nvidia.com   # NVIDIA Endpoints
-      method: ["POST"]
-EOF
-
-nemoclaw my-assistant policy set --file ~/budget-policy.yaml
-```
-
-### Step 4 — 進 sandbox 驗證隔離有效
+NemoClaw sandbox 預設不會看到 host 任何路徑 — 連我們剛建的 `~/budget-demo/` 都看不到。先驗證一下：
 
 ```bash
 nemoclaw my-assistant connect
 ```
 
-進到 sandbox 後做 3 個快速測試：
+進到 sandbox 後（prompt 變 `sandbox@...$`）：
 
 ```bash
-# (1) 看得到 public ✅
-ls /workspace/budget/
-cat /workspace/budget/transactions.csv | head -3
-
-# (2) 看不到 private（路徑根本不存在）✅
-ls /workspace/budget-demo/private 2>&1
-#  → No such file or directory
-
-# (3) 嘗試 escape 到 host 路徑 ✅ 被擋
-ls /host/budget-demo/private 2>&1
-ls ~/budget-demo/private 2>&1
-#  → 都是 No such file or directory（host 路徑沒有 mount）
+# Sandbox 看不到 host 任何路徑 ✅
+ls ~/budget-demo/ 2>&1            #  → No such file or directory
+ls /host/ 2>&1                     #  → No such file or directory
+ls /home/ubuntu/budget-demo 2>&1   #  → No such file or directory
 ```
 
-### Step 5 — 請 agent 做記帳分析
+這就是 OpenShell 的 filesystem isolation — 不用設 policy，sandbox 本來就看不到 host。
+
+### Step 3 — 把 public CSV 帶進 sandbox（但不帶 private）
+
+NemoClaw 提供 `share mount` 子命令，用 SSHFS 把 sandbox 的 `/sandbox` 雙向掛到 host：
 
 ```bash
+# 開新的 host terminal（保留 sandbox shell 不要關）
+nemoclaw my-assistant share mount
+# 預設掛到 ~/.nemoclaw/mounts/my-assistant
+```
+
+掛好後，host 端寫到 mount point 的檔案會直接出現在 sandbox 內：
+
+```bash
+# 還在 host
+mkdir -p ~/.nemoclaw/mounts/my-assistant/budget
+cp ~/budget-demo/public/transactions.csv ~/.nemoclaw/mounts/my-assistant/budget/
+# 注意：~/budget-demo/private/ 完全沒碰，private CSV 不會進 sandbox
+```
+
+回到 sandbox shell 確認 public 已經進去、private 仍然看不到：
+
+```bash
+# sandbox 內
+ls /sandbox/budget/
+#  → transactions.csv
+
+# private 路徑依舊不存在
+ls /sandbox/private 2>&1     #  → No such file or directory
+```
+
+> 不想用 `share mount` 的話，最簡單的替代方案是直接在 sandbox 內用 `cat > transactions.csv <<EOF ... EOF` heredoc 重建檔案 — 同樣達到「只有 public 進 sandbox」的效果。
+
+### Step 4 — 用 OpenClaw TUI 請 agent 做分析
+
+```bash
+# 還在 sandbox 內
 openclaw tui
 ```
 
-進 TUI 後問：
+在 TUI 內輸入：
 
 ```
-請讀 /workspace/budget/transactions.csv，算出 5 月每個 category
-的總花費和佔比，把報表寫到 /workspace/budget/reports/2026-05.md
+請讀 /sandbox/budget/transactions.csv：
+1. 把 category 分組，算出 5 月每組的總金額
+2. 算每組佔總支出的百分比
+3. 把報表寫到 /sandbox/budget/reports/2026-05.md
 ```
 
-OpenClaw 會用 sandbox 內建的 Python 跑分析、`write` 出 markdown 報表。回 host 看：
+OpenClaw 會用 sandbox 內建的 Python 跑分析、寫出 markdown 報表。
+
+接著測一下 agent 真的看不到敏感資料 — 在 TUI 同一個對話內問：
+
+```
+我這個月薪資多少？股利收入多少？
+```
+
+預期：agent 回覆**找不到這些資料** — 因為從它的視角，這些檔案物理上不存在。這不是 prompt engineering 約束，是 sandbox 隔離。
+
+離開 TUI：`/exit`。
+
+### Step 5 — 把報表抓回 host 看
+
+因為 Step 3 已經 `share mount` 過了，sandbox 內寫到 `/sandbox/budget/reports/` 的報表會自動出現在 host：
 
 ```bash
-# 退出 TUI 跟 sandbox 後，在 host：
-cat ~/budget-demo/public/reports/2026-05.md
+# host 端
+cat ~/.nemoclaw/mounts/my-assistant/budget/reports/2026-05.md
 ```
 
-✅ 完成 — agent 能讀 public、能寫 reports、能跑分析，**完全看不到** private 那份。
+完成後可以 unmount 跟 exit：
+
+```bash
+# host
+nemoclaw my-assistant share unmount
+
+# sandbox shell
+exit
+```
+
+✅ 完成 — agent 能對 public 做完整分析、寫報表、給建議，但 **物理上無法接觸 private 那份**（因為從未進 sandbox）。
 
 ### 還能延伸
 
-| 加一點變化 | 怎麼做 |
-|-----------|--------|
-| 故意問 agent 私密資訊 | TUI 問「我這個月薪資多少？」— agent 會回「找不到相關資料」，因為它真的看不到 |
-| 多一份 public CSV | `cp transactions-2026-04.csv ~/budget-demo/public/` — 不用重啟，agent 馬上看得到 |
-| 換成寫入也擋掉 | policy 把 `write:` 整段拿掉 → agent 連 reports/ 也寫不進去 |
-| 開放有限網路（例如查匯率） | policy `network.egress` 加 `- host: api.frankfurter.app` |
+| 想做的 | 怎麼做（已驗證指令） |
+|--------|--------|
+| 加一個 `/etc/hosts` alias 給 sandbox 用 | `nemoclaw my-assistant hosts-add searxng.local 192.168.1.105` |
+| 看 sandbox 目前有哪些 host aliases | `nemoclaw my-assistant hosts-list` |
+| 套用 NemoClaw 內建的 network policy preset | `nemoclaw my-assistant policy-add pypi --yes` |
+| 套用自訂 policy 檔 | `nemoclaw my-assistant policy-add --from-file ./my-policy.yaml` |
+| 看當前有哪些 policy presets 已套用 | `nemoclaw my-assistant policy-list` |
+| 把 sandbox 狀態打包 | `nemoclaw my-assistant snapshot create --name pre-experiment` |
+| 還原到某個 snapshot | `nemoclaw my-assistant snapshot restore <name-or-version>` |
+| 升級 agent 版本但保留 workspace | `nemoclaw my-assistant rebuild` |
+| 重啟 in-sandbox gateway（不開 SSH） | `nemoclaw my-assistant recover` |
+| 安裝一個 skill 進 sandbox | `nemoclaw my-assistant skill install ./my-skill/` |
+
+> 💡 NemoClaw `<name>` 的有效 actions（v0.0.41）：`connect`, `status`, `doctor`, `logs`, `policy-add/remove/list`, `hosts-add/list/remove`, `skill`, `snapshot`, `share`, `rebuild`, `recover`, `shields`, `config`, `channels`, `gateway-token`, `destroy`。**沒有** `restart` / `workspace`。要重啟用 `recover`（輕量）或 `rebuild`（升版本）。
+> `snapshot` / `share` / `skill` 都是 noun，需要 subcommand（例如 `snapshot create`、`share mount`、`skill install`）。
+> 完整參考：<https://docs.nvidia.com/nemoclaw/reference/commands>。
 
 ---
 
