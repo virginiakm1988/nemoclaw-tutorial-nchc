@@ -340,21 +340,6 @@ ls ~/budget-demo/private 2>&1             # → No such file or directory
 
 `private` 那份依然只在 host，sandbox 物理上接觸不到。
 
-#### Optional：用 `share mount` 雙向同步（進階）
-
-如果你想要 sandbox 跟 host 雙向同步檔案（例如要把 agent 跑出的報表直接寫回 host 目錄），可以用 SSHFS 掛載：
-
-```bash
-# 開新的 host terminal（保留 sandbox shell 不要關）
-# 先在 sandbox 內確認 home 路徑：echo $HOME
-nemoclaw my-assistant share mount $HOME_FROM_SANDBOX
-
-# 然後從 host cp 檔案進去
-cp ~/budget-demo/public/transactions.csv ~/.nemoclaw/mounts/my-assistant/budget/
-```
-
-> ⚠️ `share mount` 預設 sandbox 路徑是 `/sandbox`。如果你的 sandbox image 把工作目錄放在 `/home/sandbox` 或別處，`/sandbox` 會 probe 失敗，要顯式指定路徑。先 `nemoclaw <name> connect` → `pwd` 確認再 mount。
-
 ### Step 4 — 用 OpenClaw TUI 請 agent 做分析
 
 ```bash
@@ -392,18 +377,9 @@ OpenClaw 會用 sandbox 內建的 Python 跑分析、寫出 markdown 報表。
 cat ~/budget/reports/2026-05.md
 ```
 
-如果你 Step 3 走的是 optional 的 `share mount`，那 host 端會同步看到報表：
+完成後退出 sandbox：
 
 ```bash
-# host
-cat ~/.nemoclaw/mounts/my-assistant/budget/reports/2026-05.md
-nemoclaw my-assistant share unmount        # 完成後 unmount
-```
-
-退出 sandbox：
-
-```bash
-# sandbox shell
 exit
 ```
 
@@ -524,7 +500,6 @@ nemoclaw onboard
 | `unresolvable CDI devices nvidia.com/gpu=all` | 見 9.2 — 安裝 NVIDIA Container Toolkit |
 | `Docker GPU patch failed: AMD CDI spec not found` | NemoClaw GPU patch 會找 AMD CDI，沒有就失敗。先 `openshell sandbox delete <name>`，再 `export NEMOCLAW_DOCKER_GPU_PATCH=0` 跳過 patch，重跑 `nemoclaw onboard`。NVIDIA GPU 還是會透過 CDI 正常 passthrough |
 | `'openclaw agent --local' is not supported inside NemoClaw sandboxes` | `--local` 會繞過 gateway 安全機制，預期會被擋。在 sandbox 內改用 `openclaw tui`（互動）或從 host 端用 dashboard / `nemoclaw <name> connect` |
-| `share mount`：`Could not verify sandbox path '/sandbox' (missing path or probe failure)` | 預設路徑 `/sandbox` 在某些 image 不存在。先 `nemoclaw <name> connect` → `pwd` 確認真實 home 路徑，再 `nemoclaw <name> share mount <該路徑>` 顯式指定 |
 
 ### 9.1 npm `ECONNRESET` — 安裝 NemoClaw dependencies 時連線中斷
 
