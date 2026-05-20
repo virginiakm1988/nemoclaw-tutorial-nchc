@@ -142,7 +142,6 @@ openclaw tui
 
 ```bash
 nemoclaw my-assistant status        # agent 狀態 / uptime / inference provider
-nemoclaw list                       # 列出所有 sandbox
 ```
 
 ### Demo 2 — 看 sandbox 內部的檔案
@@ -177,54 +176,13 @@ cat ~/.openclaw/openclaw.json | head -40
 ls ~/.openclaw/logs/
 ```
 
-### Demo 3 — 換一個 inference provider
-
-```bash
-nemoclaw my-assistant inference set --provider anthropic
-nemoclaw my-assistant inference test    # 跑一次 ping 驗證
-```
-
-### Demo 4 — 啟動 / 停止 / 重啟
-
-```bash
-nemoclaw my-assistant stop
-nemoclaw my-assistant start
-nemoclaw my-assistant restart
-```
-
-### Demo 5 — 接 Messaging Channel（Telegram 範例）
-
-```bash
-nemoclaw my-assistant channels add telegram
-# 依提示輸入 Bot Token
-nemoclaw my-assistant channels list
-```
-
-設定完成後，從你的 Telegram bot 傳訊息就會被 agent 接收。
-
-### Demo 6 — 看 logs / 監控活動
+### Demo 3 — 看 logs
 
 ```bash
 nemoclaw my-assistant logs --tail 50
-nemoclaw my-assistant activity      # 顯示 sandbox 內近期 inference / tool calls
 ```
 
-### Demo 7 — Backup & Restore
-
-```bash
-nemoclaw my-assistant backup ./my-assistant-backup.tar.gz
-nemoclaw my-assistant restore ./my-assistant-backup.tar.gz
-```
-
-### Demo 8 — Network Policy（控管 agent 可以連哪些網域）
-
-```bash
-nemoclaw my-assistant policy show
-nemoclaw my-assistant policy allow-host api.openai.com
-nemoclaw my-assistant policy deny-host *.untrusted.com
-```
-
-### Demo 9 — 清掉 sandbox
+### Demo 4 — 清掉 sandbox
 
 ```bash
 nemoclaw my-assistant destroy
