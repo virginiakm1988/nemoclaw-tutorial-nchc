@@ -325,24 +325,6 @@ exit
 
 ✅ 完成 — agent 能對 public 做完整分析、寫報表、給建議，但 **物理上無法接觸 private 那份**（因為從未進 sandbox）。
 
-### 還能延伸
-
-| 想做的 | 怎麼做（已驗證指令） |
-|--------|--------|
-| 加一個 `/etc/hosts` alias 給 sandbox 用 | `nemoclaw my-assistant hosts-add searxng.local 192.168.1.105` |
-| 看 sandbox 目前有哪些 host aliases | `nemoclaw my-assistant hosts-list` |
-| 套用 NemoClaw 內建的 network policy preset | `nemoclaw my-assistant policy-add pypi --yes` |
-| 套用自訂 policy 檔 | `nemoclaw my-assistant policy-add --from-file ./my-policy.yaml` |
-| 看當前有哪些 policy presets 已套用 | `nemoclaw my-assistant policy-list` |
-| 把 sandbox 狀態打包 | `nemoclaw my-assistant snapshot create --name pre-experiment` |
-| 還原到某個 snapshot | `nemoclaw my-assistant snapshot restore <name-or-version>` |
-| 升級 agent 版本但保留 workspace | `nemoclaw my-assistant rebuild` |
-| 重啟 in-sandbox gateway（不開 SSH） | `nemoclaw my-assistant recover` |
-| 安裝一個 skill 進 sandbox | `nemoclaw my-assistant skill install ./my-skill/` |
-
-> 💡 NemoClaw `<name>` 的有效 actions（v0.0.41）：`connect`, `status`, `doctor`, `logs`, `policy-add/remove/list`, `hosts-add/list/remove`, `skill`, `snapshot`, `share`, `rebuild`, `recover`, `shields`, `config`, `channels`, `gateway-token`, `destroy`。**沒有** `restart` / `workspace`。要重啟用 `recover`（輕量）或 `rebuild`（升版本）。
-> `snapshot` / `share` / `skill` 都是 noun，需要 subcommand（例如 `snapshot create`、`share mount`、`skill install`）。
-> 完整參考：<https://docs.nvidia.com/nemoclaw/reference/commands>。
 
 ---
 
