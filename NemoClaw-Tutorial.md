@@ -125,10 +125,25 @@ http://localhost:18789
 取得登入 token：
 
 ```bash
-nemoclaw my-assistant token
+nemoclaw my-assistant gateway-token
 ```
 
 開啟瀏覽器，貼上 token，就能用 chat UI 跟 agent 對話。
+
+#### 從遠端 VM 用 SSH 連的話，要做 port forwarding
+
+如果你是 `ssh ubuntu@<vm-ip>` 連到遠端機器跑 NemoClaw，dashboard 在 VM 的 `localhost:18789`，本機瀏覽器看不到。重連時加 `-L`：
+
+```bash
+# 在本機 terminal
+exit                                              # 先斷現有 SSH
+ssh -L 18789:localhost:18789 ubuntu@<vm-ip>       # 帶 tunnel 重連
+```
+
+然後本機瀏覽器打開 `http://localhost:18789` 即可。流量會走 SSH tunnel 到 VM 上的 dashboard。
+
+> **不想斷線**：在 SSH session 內按 `~C`（行首才有效），輸入 `-L 18789:localhost:18789` Enter，動態加 tunnel。
+> **PuTTY**：Connection → SSH → Tunnels → Source port `18789`、Destination `localhost:18789`，Add → 重連。
 
 ### 5.2 透過 Terminal
 
