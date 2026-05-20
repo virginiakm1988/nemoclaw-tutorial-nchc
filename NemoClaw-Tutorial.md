@@ -114,38 +114,7 @@ nemoclaw onboard
 
 ## 5. 與你的 Agent 互動
 
-### 5.1 透過瀏覽器 (Dashboard)
-
-安裝完成後 CLI 會顯示 dashboard URL，預設 port `18789`：
-
-```
-http://localhost:18789
-```
-
-取得登入 token：
-
-```bash
-nemoclaw my-assistant gateway-token
-```
-
-開啟瀏覽器，貼上 token，就能用 chat UI 跟 agent 對話。
-
-#### 從遠端 VM 用 SSH 連的話，要做 port forwarding
-
-如果你是 `ssh ubuntu@<vm-ip>` 連到遠端機器跑 NemoClaw，dashboard 在 VM 的 `localhost:18789`，本機瀏覽器看不到。重連時加 `-L`：
-
-```bash
-# 在本機 terminal
-exit                                              # 先斷現有 SSH
-ssh -L 18789:localhost:18789 ubuntu@<vm-ip>       # 帶 tunnel 重連
-```
-
-然後本機瀏覽器打開 `http://localhost:18789` 即可。流量會走 SSH tunnel 到 VM 上的 dashboard。
-
-> **不想斷線**：在 SSH session 內按 `~C`（行首才有效），輸入 `-L 18789:localhost:18789` Enter，動態加 tunnel。
-> **PuTTY**：Connection → SSH → Tunnels → Source port `18789`、Destination `localhost:18789`，Add → 重連。
-
-### 5.2 透過 Terminal
+### 5.１ 透過 Terminal
 
 連進 sandbox：
 
@@ -202,30 +171,7 @@ nemoclaw my-assistant start
 nemoclaw my-assistant restart
 ```
 
-### Demo 5 — 加一個 Skill（讓 agent 學新技能）
-
-OpenClaw 的 skill 是一個資料夾 + `SKILL.md`。範例：建立一個「今日 NASA APOD」skill。
-
-```bash
-nemoclaw my-assistant connect
-mkdir -p ~/.openclaw/skills/nasa-apod
-cat > ~/.openclaw/skills/nasa-apod/SKILL.md <<'EOF'
----
-name: nasa-apod
-description: Fetch NASA Astronomy Picture of the Day
----
-
-When the user asks about today's astronomy picture, call:
-
-    curl -s "https://api.nasa.gov/planetary/apod?api_key=DEMO_KEY"
-
-Return the title, explanation, and image URL.
-EOF
-```
-
-回到 chat 介面問：「What's today's NASA picture?」就會觸發這個 skill。
-
-### Demo 6 — 接 Messaging Channel（Telegram 範例）
+### Demo 5 — 接 Messaging Channel（Telegram 範例）
 
 ```bash
 nemoclaw my-assistant channels add telegram
@@ -235,21 +181,21 @@ nemoclaw my-assistant channels list
 
 設定完成後，從你的 Telegram bot 傳訊息就會被 agent 接收。
 
-### Demo 7 — 看 logs / 監控活動
+### Demo 6 — 看 logs / 監控活動
 
 ```bash
 nemoclaw my-assistant logs --tail 50
 nemoclaw my-assistant activity      # 顯示 sandbox 內近期 inference / tool calls
 ```
 
-### Demo 8 — Backup & Restore
+### Demo 7 — Backup & Restore
 
 ```bash
 nemoclaw my-assistant backup ./my-assistant-backup.tar.gz
 nemoclaw my-assistant restore ./my-assistant-backup.tar.gz
 ```
 
-### Demo 9 — Network Policy（控管 agent 可以連哪些網域）
+### Demo 8 — Network Policy（控管 agent 可以連哪些網域）
 
 ```bash
 nemoclaw my-assistant policy show
@@ -257,7 +203,7 @@ nemoclaw my-assistant policy allow-host api.openai.com
 nemoclaw my-assistant policy deny-host *.untrusted.com
 ```
 
-### Demo 10 — 清掉 sandbox
+### Demo 9 — 清掉 sandbox
 
 ```bash
 nemoclaw my-assistant destroy
