@@ -147,13 +147,34 @@ nemoclaw list                       # 列出所有 sandbox
 
 ### Demo 2 — 看 sandbox 內部的檔案
 
-OpenClaw 把 memory 寫成 plain Markdown，可以直接讀：
+OpenClaw 把它的狀態全部寫成本地檔案，可以直接 `ls` 進去看：
 
 ```bash
 nemoclaw my-assistant connect
 # 進去 sandbox 後：
-ls ~/.openclaw/memory/
-cat ~/.openclaw/memory/MEMORY.md
+ls ~/.openclaw/
+```
+
+預期看到的主要項目：
+
+| 項目 | 內容 |
+|------|------|
+| `openclaw.json` | agent 主設定（provider、model、tools 開關等） |
+| `agents/` | 已建立的 agent 定義 |
+| `skills/` | agent 可用的 skill |
+| `memory/` | agent 對話累積出的記憶（**剛建好是空的**，要跟 agent 聊過才會有內容） |
+| `logs/` | 歷次對話 / tool call 的紀錄 |
+| `credentials/` | 加密儲存的 provider API key |
+| `flows/`、`extensions/`、`canvas/` | 進階功能 |
+
+兩個最值得看的：
+
+```bash
+# 看 agent 現在連哪個 provider、用哪個 model
+cat ~/.openclaw/openclaw.json | head -40
+
+# 看最近一次對話的 log（跟 agent 聊過再來看）
+ls ~/.openclaw/logs/
 ```
 
 ### Demo 3 — 換一個 inference provider
