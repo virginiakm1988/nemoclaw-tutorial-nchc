@@ -138,11 +138,15 @@ nemoclaw my-assistant token
 nemoclaw my-assistant connect
 ```
 
-進去後可以直接和 OpenClaw 對話：
+進去後啟動 OpenClaw 的 TUI 對話介面：
 
 ```bash
-openclaw agent --agent main --local -m "hello, who are you?" --session-id demo-001
+openclaw tui
 ```
+
+在 TUI 內直接打字即可。離開：先 `/exit` 離開 chat，再 `exit` 回到 host shell。
+
+> ⚠️ **不要用 `openclaw agent --local`** — 這個 flag 會繞過 sandbox 的 secret scanning / network policy / inference auth，NemoClaw 已經明確阻擋。Sandbox 內一律用 `openclaw tui`（互動）或從 host 端透過 dashboard。
 
 ---
 
@@ -246,6 +250,135 @@ nemoclaw my-assistant destroy
 
 ---
 
+## 6.5 Mini-demo：用 NemoClaw 做「只能看 public 帳本」的記帳助手
+
+這個 demo 把前面學到的東西串起來：建立**兩份**假帳本（一份 public、一份 private），透過 OpenShell policy 讓 agent **只能讀 public 的那份**，然後請 agent 做簡單分析。重點是體驗 NemoClaw 的 filesystem 隔離。
+
+### Step 1 — 在 host 上建兩份假 CSV
+
+```bash
+# host shell（不是 sandbox 內）
+mkdir -p ~/budget-demo/public ~/budget-demo/private
+
+# Public：可以給 agent 看的日常消費
+cat > ~/budget-demo/public/transactions.csv <<'EOF'
+date,amount,merchant,category
+2026-05-02,-3200,房東,居住
+2026-05-03,-185,全聯,生活
+2026-05-05,-95,星巴克,餐飲
+2026-05-07,-1250,台電,居住
+2026-05-09,-420,Uber Eats,餐飲
+2026-05-11,-680,家樂福,生活
+2026-05-13,-95,星巴克,餐飲
+2026-05-15,-260,Spotify,訂閱
+2026-05-18,-1480,誠品,購物
+2026-05-21,-560,7-11,生活
+2026-05-25,-95,星巴克,餐飲
+2026-05-28,-340,計程車,通勤
+EOF
+
+# Private：薪資、投資、敏感金額 — 不希望 agent 看到
+cat > ~/budget-demo/private/salary_and_investments.csv <<'EOF'
+date,amount,source,note
+2026-05-10,85000,公司薪轉,月薪
+2026-05-10,-15000,XX證券,定期定額 0050
+2026-05-15,42000,XX銀行,股利
+2026-05-20,-200000,XX建設,房屋頭期款匯款
+EOF
+```
+
+### Step 2 — 把 public 目錄掛進 sandbox，private 不掛
+
+NemoClaw / OpenShell 的 sandbox 預設是隔離的 — host 的檔案 **不會** 自動出現在 sandbox 內。我們只把 public 那份 mount 進去：
+
+```bash
+# 停掉並重新 attach 一個只含 public 目錄的 workspace
+nemoclaw my-assistant workspace add ~/budget-demo/public --as /workspace/budget --readonly
+nemoclaw my-assistant restart
+```
+
+關鍵點：
+- `--readonly`：agent 不能改你的原始檔（多一層保險）
+- `private/` 完全沒掛進去，sandbox 內沒有任何路徑能看到它
+
+### Step 3 — 用 policy 把 agent 鎖在 `/workspace/budget`
+
+```bash
+cat > ~/budget-policy.yaml <<'EOF'
+filesystem:
+  read:
+    - /workspace/budget/**     # 只能讀 public CSV
+    - /sandbox/.openclaw/**    # agent 自己的 memory / skills
+    - /usr/**                  # 系統 binary
+  write:
+    - /workspace/budget/reports/**
+    - /sandbox/.openclaw/memory/**
+
+network:
+  egress:
+    - host: integrate.api.nvidia.com   # NVIDIA Endpoints
+      method: ["POST"]
+EOF
+
+nemoclaw my-assistant policy set --file ~/budget-policy.yaml
+```
+
+### Step 4 — 進 sandbox 驗證隔離有效
+
+```bash
+nemoclaw my-assistant connect
+```
+
+進到 sandbox 後做 3 個快速測試：
+
+```bash
+# (1) 看得到 public ✅
+ls /workspace/budget/
+cat /workspace/budget/transactions.csv | head -3
+
+# (2) 看不到 private（路徑根本不存在）✅
+ls /workspace/budget-demo/private 2>&1
+#  → No such file or directory
+
+# (3) 嘗試 escape 到 host 路徑 ✅ 被擋
+ls /host/budget-demo/private 2>&1
+ls ~/budget-demo/private 2>&1
+#  → 都是 No such file or directory（host 路徑沒有 mount）
+```
+
+### Step 5 — 請 agent 做記帳分析
+
+```bash
+openclaw tui
+```
+
+進 TUI 後問：
+
+```
+請讀 /workspace/budget/transactions.csv，算出 5 月每個 category
+的總花費和佔比，把報表寫到 /workspace/budget/reports/2026-05.md
+```
+
+OpenClaw 會用 sandbox 內建的 Python 跑分析、`write` 出 markdown 報表。回 host 看：
+
+```bash
+# 退出 TUI 跟 sandbox 後，在 host：
+cat ~/budget-demo/public/reports/2026-05.md
+```
+
+✅ 完成 — agent 能讀 public、能寫 reports、能跑分析，**完全看不到** private 那份。
+
+### 還能延伸
+
+| 加一點變化 | 怎麼做 |
+|-----------|--------|
+| 故意問 agent 私密資訊 | TUI 問「我這個月薪資多少？」— agent 會回「找不到相關資料」，因為它真的看不到 |
+| 多一份 public CSV | `cp transactions-2026-04.csv ~/budget-demo/public/` — 不用重啟，agent 馬上看得到 |
+| 換成寫入也擋掉 | policy 把 `write:` 整段拿掉 → agent 連 reports/ 也寫不進去 |
+| 開放有限網路（例如查匯率） | policy `network.egress` 加 `- host: api.frankfurter.app` |
+
+---
+
 ## 7. 進階學習資源
 
 | 主題 | 路徑 / 連結 |
@@ -338,6 +471,8 @@ nemoclaw onboard
 | 在 Ubuntu 上 Ollama 解壓失敗 | 安裝 `zstd`：`sudo apt install zstd` |
 | `npm error code ECONNRESET` 安裝時斷線 | 見 9.1 — 調 npm timeout / 換 mirror |
 | `unresolvable CDI devices nvidia.com/gpu=all` | 見 9.2 — 安裝 NVIDIA Container Toolkit |
+| `Docker GPU patch failed: AMD CDI spec not found` | NemoClaw GPU patch 會找 AMD CDI，沒有就失敗。先 `openshell sandbox delete <name>`，再 `export NEMOCLAW_DOCKER_GPU_PATCH=0` 跳過 patch，重跑 `nemoclaw onboard`。NVIDIA GPU 還是會透過 CDI 正常 passthrough |
+| `'openclaw agent --local' is not supported inside NemoClaw sandboxes` | `--local` 會繞過 gateway 安全機制，預期會被擋。在 sandbox 內改用 `openclaw tui`（互動）或從 host 端用 dashboard / `nemoclaw <name> connect` |
 
 ### 9.1 npm `ECONNRESET` — 安裝 NemoClaw dependencies 時連線中斷
 
